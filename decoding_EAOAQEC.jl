@@ -525,7 +525,7 @@ function decode_EAOAQEC_single_level(s_bar, S, G, L, T_0, p, t_s_dict)
     t_s_bar = BitVector(t_s_dict[s_bar])
     
     # Initialize trackers for the maximum probability search
-    # We use Inf so that the first calculated probability will always be smaller
+    # We use 0 so that the first calculated probability will always be larger
     max_prob = 0
     l_star = BitVector(undef, 26)
     t_star = BitVector(undef, 26)
@@ -601,7 +601,7 @@ function decode_EAOAQEC_two_level(s_bar, S, G, L, T_0, p, t_s_dict)
     # STAGE 1
     
     # Initialize trackers for the maximum probability search
-    # We use Inf so that the first calculated probability will always be smaller
+    # We use 0 so that the first calculated probability will always be larger
     max_prob = 0
     l_star = BitVector(undef, 26)
     t_star = BitVector(undef, 26)
@@ -659,7 +659,7 @@ function decode_EAOAQEC_two_level(s_bar, S, G, L, T_0, p, t_s_dict)
     # STAGE 2
     
     # Initialize trackers for the maximum probability search
-    # We use Inf so that the first calculated probability will always be smaller
+    # We use 0 so that the first calculated probability will always be larger
     max_prob = 0
     t_q_star_star = BitVector(undef, 26)
     
@@ -699,6 +699,205 @@ println("t_s_q_bar = ", print_pauli_operators(t_s_q_bar', true))
     return recovery_operator, l_star, t_q_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar, t_star, t_s_q_bar, t_q_star_star, t_s_C_q_bar
 end
 
+# Decode the code
+
+"""
+    decode_EAOAQEC_two_level(S, G, L, T_0, s_bar, p, t_s_dict)
+
+Performs decoding for an Entanglement-Assisted Operator Quantum Error Correction (EAOAQEC) code.
+Returns the recovery operator, the optimal logical operator l*, and the transversal element t*.
+"""
+function decode_EAOAQEC_two_level_type2(s_bar, S, G, L, T_0, p, t_s_dict)
+
+    # 1. Obtain the quantum stabilizers
+    S_Q_indices, full_S_Q_returned = obtain_stabs_in_S_Q(S, T_0)
+    if !full_S_Q_returned
+        throw("The entire S_Q is not returned. The code for obtaining the entire S_Q is not implemented yet.")
+    end
+    
+    # Retrieve t_s_q_bar and t_s_C_q_bar from the dictionary using the syndrome s_q_bar and s_C_q_bar
+    s_q_bar = [i in S_Q_indices ? s_bar[i] : 0 for i in eachindex(s_bar)]
+    t_s_q_bar = BitVector(t_s_dict[s_q_bar]) 
+
+    s_C_q_bar = [i in S_Q_indices ? 0 : s_bar[i] for i in eachindex(s_bar)]
+    t_s_C_q_bar = BitVector(t_s_dict[s_C_q_bar])
+    
+    # STAGE 1
+    
+    # Initialize trackers for the maximum probability search
+    # We use 0 so that the first calculated probability will always be larger
+    max_prob = 0
+    t_star_star_star = BitVector(undef, 26)
+    k_logical = size(L, 1)
+    num_T0_rows = size(T_0, 1)
+    
+    for i in 1:num_T0_rows
+        t = BitVector(T_0[i,:])        
+            # Prepare the second argument: (t + t_s_bar) mod 2
+            # In Julia, .!= or .⊻ serves as a bitwise XOR for BitVectors
+            t_combined = t .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+            println("Syndrome for t_combined = ", findall(!iszero, get_syndrome(S, t_combined)))
+            
+            prob = 0
+            # Calculate probability using the external function
+            for j in 0:(2^k_logical - 1)
+                # Generate coefficients for the linear combination of rows
+                coeffs = digits(j, base=2, pad=k_logical)
+            
+                # Compute element l in the row space: l = coeffs * L (mod 2)
+                # We use transpose multiplication and ensure results are 0 or 1
+                l = BitVector(vec(coeffs' * L) .% 2)
+                prob += calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+            end
+            # 5. Check for the maximum probability
+            println("prob = ", prob, ", error = ", print_pauli_operators((l.⊻ t_combined)', true))
+            if prob > max_prob
+                max_prob = prob
+                t_star_star_star = copy(t)
+            end
+    end
+    
+    l_star_star_star = BitVector(undef, 26)
+        
+    # STAGE 2
+    
+    # Initialize trackers for the maximum probability search
+    # We use 0 so that the first calculated probability will always be larger
+    l_star_star_star = BitVector(undef, 26)
+    max_prob = 0
+    t_combined = t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+        # 2. Iterate over all elements t in T_0_q (rowspace of the matrix T_0)
+            for j in 0:(2^k_logical - 1)
+                # Generate coefficients for the linear combination of rows
+                coeffs = digits(j, base=2, pad=k_logical)
+             
+                # Compute element l in the row space: l = coeffs * L (mod 2)
+                # We use transpose multiplication and ensure results are 0 or 1
+                l = BitVector(vec(coeffs' * L) .% 2)
+                prob = calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+            end
+            # 5. Check for the maximum probability
+            println("prob = ", prob, ", error = ", print_pauli_operators((l .⊻ t_combined)', true))
+            if prob > max_prob
+                max_prob = prob
+                t_star_star_star = copy(t)
+            end
+    # 6. Compute the recovery operator: l* + t* + t_s_bar (mod 2)
+    recovery_operator = l_star_star_star .⊻ t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+println("l_star_star_star = ", print_pauli_operators(l_star_star_star', true))
+println("t_star_star_star = ", print_pauli_operators(t_star_star_star', true))
+println("t_s_C_q_bar = ", print_pauli_operators(t_s_C_q_bar', true))
+println("Syndrome for t_s_C_q_bar = ", findall(!iszero,get_syndrome(S, t_s_C_q_bar)))
+println("t_s_q_bar = ", print_pauli_operators(t_s_q_bar', true))
+println("max prob = ", max_prob, ", recovery operator = ", print_pauli_operators(recovery_operator', true), "\n\n")
+    
+    return recovery_operator, l_star_star_star, t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar, t_star_star_star, t_s_q_bar, t_s_C_q_bar
+end
+
+function decode_EAOAQEC_two_level_type2(s_bar, S, G, L, T_0, p, t_s_dict)
+
+    # 1. Obtain the quantum stabilizers and verify the entire S_Q is returned
+    S_Q_indices, full_S_Q_returned = obtain_stabs_in_S_Q(S, T_0)
+    if !full_S_Q_returned
+        throw("The entire S_Q is not returned. The code for obtaining the entire S_Q is not implemented yet.")
+    end
+    
+    # 2. Extract quantum syndrome s_q_bar and lookup corresponding pure error t_s_q_bar
+    s_q_bar = [i in S_Q_indices ? s_bar[i] : 0 for i in eachindex(s_bar)]
+    t_s_q_bar = BitVector(t_s_dict[s_q_bar]) 
+
+    # 3. Extract classical syndrome s_C_q_bar and lookup corresponding pure error t_s_C_q_bar
+    s_C_q_bar = [i in S_Q_indices ? 0 : s_bar[i] for i in eachindex(s_bar)]
+    t_s_C_q_bar = BitVector(t_s_dict[s_C_q_bar])
+    
+    # ==========================================
+    # STAGE 1: Find the optimal transversal operator
+    # ==========================================
+    
+    # Initialize trackers to find the optimal transversal operator (t_star_star_star)
+    max_prob = 0
+    t_star_star_star = BitVector(undef, 26)
+    k_logical = size(L, 1)
+    num_T0_rows = size(T_0, 1)
+    
+    # Iterate through each row in T_0
+    for i in 1:num_T0_rows
+        t = BitVector(T_0[i,:])        
+        
+        # Calculate combined pure error: (t + t_s_C_q_bar + t_s_q_bar) mod 2
+        t_combined = t .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+        println("Syndrome for t_combined = ", findall(!iszero, get_syndrome(S, t_combined)))
+        
+        prob = 0
+        local l # Declare l as local so it can be accessed by the print statement later
+        
+        # Accumulate total probability over all possible logical operators
+        for j in 0:(2^k_logical - 1)
+            # Generate binary coefficients for the linear combination of rows
+            coeffs = digits(j, base=2, pad=k_logical)
+        
+            # Compute element l in the row space: l = coeffs^T * L (mod 2)
+            l = BitVector(vec(coeffs' * L) .% 2)
+            prob += calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+        end
+        
+        # Print total accumulated probability for this gauge operator t
+        println("prob = ", prob, ", error = ", print_pauli_operators((l .⊻ t_combined)', true))
+        
+        # Update the maximum probability and store the optimal t
+        if prob > max_prob
+            max_prob = prob
+            t_star_star_star = copy(t)
+        end
+    end
+        
+    # ==========================================
+    # STAGE 2: Find the optimal logical operator
+    # ==========================================
+    
+    # Reset trackers to find the optimal logical operator (l_star_star_star)
+    l_star_star_star = BitVector(undef, 26)
+    max_prob = 0
+    
+    # Recalculate combined pure error using the optimal t found in Stage 1
+    t_combined = t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+    
+    # Iterate over all logical operators to find the one with maximum probability
+    for j in 0:(2^k_logical - 1)
+        # Generate binary coefficients for the linear combination of rows
+        coeffs = digits(j, base=2, pad=k_logical)
+     
+        # Compute element l in the row space: l = coeffs^T * L (mod 2)
+        l = BitVector(vec(coeffs' * L) .% 2)
+        
+        # Calculate the specific coset probability for this logical operator l
+        prob = calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+        
+        println("prob = ", prob, ", error = ", print_pauli_operators((l .⊻ t_combined)', true))
+        
+        # Check if current probability is the maximum; if so, update max_prob and store optimal l
+        if prob > max_prob
+            max_prob = prob
+            l_star_star_star = copy(l)
+        end
+    end
+    
+    # Compute the final recovery operator: l* + t* + t_s_C_q_bar + t_s_q_bar (mod 2)
+    recovery_operator = l_star_star_star .⊻ t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+
+    # Print final tracked elements
+    println("l_star_star_star = ", print_pauli_operators(l_star_star_star', true))
+    println("t_star_star_star = ", print_pauli_operators(t_star_star_star', true))
+    println("t_s_C_q_bar = ", print_pauli_operators(t_s_C_q_bar', true))
+    println("Syndrome for t_s_C_q_bar = ", findall(!iszero, get_syndrome(S, t_s_C_q_bar)))
+    println("t_s_q_bar = ", print_pauli_operators(t_s_q_bar', true))
+    println("max prob = ", max_prob, ", recovery operator = ", print_pauli_operators(recovery_operator', true), "\n\n")
+    
+    # Return the recovery operator alongside the extracted components
+    return recovery_operator, l_star_star_star, t_combined, t_star_star_star, t_s_q_bar, t_s_C_q_bar
+end
+
+
 function main()
 for m in 4:4
    # Generate the syndrome to coset transversal dictionary
@@ -733,7 +932,7 @@ for m in 4:4
 		# Check if the syndrome of the recovery operator is equal to that of the error
 		@assert any(get_syndrome(S, row) == (get_syndrome(S, r1) .⊻ s1) for row in eachrow(T_0))
 
-        println("Two level decoding procedure:")
+        println("\n","Two level decoding procedure:\n")
 		r1_twolevel, l1_twolevel, t1_twolevel, t_star1, t_s_bar1_twolevel, t_q1, t_s_C_q_bar1 = decode_EAOAQEC_two_level(s1, S, G, L, T_0, p, t_s_dict)
 
         println("r1_twolevel = ", print_pauli_operators(r1_twolevel, true))
@@ -748,6 +947,23 @@ for m in 4:4
 
         # Check if the syndrome of the recovery operator is equal to that of the error
         @assert any(get_syndrome(S, row) == (get_syndrome(S, r1_twolevel) .⊻ s1) for row in eachrow(T_0))
+
+        println("\n", "Two level decoding procedure (Type 2):\n")
+        r1_two_level_2, l1_twolevel_2, t1_twolevel_2, t_star_star_star, t_s_q_bar1_twolevel_2, t_s_C_q_bar1_twolevel_2 = decode_EAOAQEC_two_level_type2(s1, S, G, L, T_0, p, t_s_dict)
+
+        println("r1_two_level_2 = ", print_pauli_operators(r1_two_level_2, true))
+        println("l1_twolevel_2 = ", print_pauli_operators(l1_twolevel_2, true))   
+        println("t1_twolevel_2 = ", print_pauli_operators(t1_twolevel_2, true))
+        println("t_star_star_star = ", print_pauli_operators(t_star_star_star, true))
+        
+        isnothing(t_s_q_bar1_twolevel_2) || println("t_s_q_bar1_twolevel_2 = ", print_pauli_operators(t_s_q_bar1_twolevel_2, true))
+        isnothing(t_s_C_q_bar1_twolevel_2) || println("t_s_C_q_bar1_twolevel_2 = ", print_pauli_operators(t_s_C_q_bar1_twolevel_2, true))
+        
+        println("syndrome for r1_two_level_2 = ", findall(!iszero, get_syndrome(S, r1_two_level_2)))
+        println("r1_two_level_2 = ", print_pauli_operators(r1_two_level_2, true), ", lowest weight operator in coset: ", print_pauli_operators(lowest_weight_coset_vector(l1_twolevel_2, t1_twolevel_2, S, G), true))
+
+        # Check if the syndrome of the recovery operator is equal to that of the error
+        @assert any(get_syndrome(S, row) == (get_syndrome(S, r1_two_level_2) .⊻ s1) for row in eachrow(T_0))
 
         println("\n\n Example 2: \n\n")
         println("e2 = ", print_pauli_operators(e2, true))
@@ -765,7 +981,7 @@ for m in 4:4
         # Check if the syndrome of the recovery operator is equal to that of the error
 		@assert any(get_syndrome(S, row) == (get_syndrome(S, r2) .⊻ s2) for row in eachrow(T_0))
 
-        println("Two level decoding procedure:")
+        println("\n", "Two level decoding procedure:\n")
         r2_twolevel, l2_twolevel, t2_twolevel, t_star2, t_s_bar2_twolevel, t_q2, t_s_C_q_bar2 = decode_EAOAQEC_two_level(s2, S, G, L, T_0, p, t_s_dict)
 
         println("r2_twolevel = ", print_pauli_operators(r2_twolevel, true))
@@ -780,6 +996,26 @@ for m in 4:4
 
         # Check if the syndrome of the recovery operator is equal to that of the error
 		@assert any(get_syndrome(S, row) == (get_syndrome(S, r2_twolevel) .⊻ s2) for row in eachrow(T_0))
+
+
+        println("\n", "Two level decoding procedure (Type 2):\n")
+        r2_two_level_2, l2_twolevel_2, t2_twolevel_2, t_star_star_star, t_s_q_bar2_twolevel_2, t_s_C_q_bar2_twolevel_2 = decode_EAOAQEC_two_level_type2(s2, S, G, L, T_0, p, t_s_dict)
+
+        println("r2_two_level_2 = ", print_pauli_operators(r2_two_level_2, true))
+        println("l2_twolevel_2 = ", print_pauli_operators(l2_twolevel_2, true))   
+        println("t2_twolevel_2 = ", print_pauli_operators(t2_twolevel_2, true))
+        println("t_star_star_star = ", print_pauli_operators(t_star_star_star, true))
+        
+        isnothing(t_s_q_bar2_twolevel_2) || println("t_s_q_bar2_twolevel_2 = ", print_pauli_operators(t_s_q_bar2_twolevel_2, true))
+        isnothing(t_s_C_q_bar2_twolevel_2) || println("t_s_C_q_bar2_twolevel_2 = ", print_pauli_operators(t_s_C_q_bar2_twolevel_2, true))
+        
+        println("syndrome for r2_two_level_2 = ", findall(!iszero, get_syndrome(S, r2_two_level_2)))
+        println("r2_two_level_2 = ", print_pauli_operators(r2_two_level_2', true), ", lowest weight operator in coset: ", print_pauli_operators(lowest_weight_coset_vector(l2_twolevel_2, t2_twolevel_2, S, G), true))
+
+        # Check if the syndrome of the recovery operator is equal to that of the error
+        @assert any(get_syndrome(S, row) == (get_syndrome(S, r2_two_level_2) .⊻ s2) for row in eachrow(T_0))
+
+        
 else
     println("missing syndromes = ", missing_syndrome)
 end
