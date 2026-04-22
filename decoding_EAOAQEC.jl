@@ -649,8 +649,9 @@ function decode_EAOAQEC_two_level(s_bar, S, G, L, T_0, p, t_s_dict)
     println("Syndrome for recovery after stage 1 = ", findall(!iszero, get_syndrome(S, l_star .⊻ t_star .⊻ t_s_q_bar)))
     println("Syndrome for recovery corresponds to coset transversals? ", any(get_syndrome(S, row) == (get_syndrome(S, l_star .⊻ t_star .⊻ t_s_q_bar) .⊻ s_bar) for row in eachrow(T_0)))
     println("Desirable syndrome support: ")
+      println("Desirable syndrome support: ")
     for row in eachrow(T_0)
-        println(findall(!iszero, get_syndrome(S, l_star .⊻ t_star .⊻ t_s_q_bar .⊻ row)))
+        println(findall(!iszero, s_bar .⊻ get_syndrome(S, row)))
     end
     if any(get_syndrome(S, row) == (get_syndrome(S, l_star .⊻ t_star .⊻ t_s_q_bar) .⊻ s_bar) for row in eachrow(T_0))
         return l_star .⊻ t_star .⊻ t_s_q_bar, l_star, t_star .⊻ t_s_q_bar, t_star, t_s_q_bar, nothing, nothing
@@ -701,98 +702,98 @@ end
 
 # Decode the code
 
-"""
-    decode_EAOAQEC_two_level(S, G, L, T_0, s_bar, p, t_s_dict)
+# """
+#     decode_EAOAQEC_two_level(S, G, L, T_0, s_bar, p, t_s_dict)
 
-Performs decoding for an Entanglement-Assisted Operator Quantum Error Correction (EAOAQEC) code.
-Returns the recovery operator, the optimal logical operator l*, and the transversal element t*.
-"""
-function decode_EAOAQEC_two_level_type2(s_bar, S, G, L, T_0, p, t_s_dict)
+# Performs decoding for an Entanglement-Assisted Operator Quantum Error Correction (EAOAQEC) code.
+# Returns the recovery operator, the optimal logical operator l*, and the transversal element t*.
+# """
+# function decode_EAOAQEC_two_level_type2(s_bar, S, G, L, T_0, p, t_s_dict)
 
-    # 1. Obtain the quantum stabilizers
-    S_Q_indices, full_S_Q_returned = obtain_stabs_in_S_Q(S, T_0)
-    if !full_S_Q_returned
-        throw("The entire S_Q is not returned. The code for obtaining the entire S_Q is not implemented yet.")
-    end
+#     # 1. Obtain the quantum stabilizers
+#     S_Q_indices, full_S_Q_returned = obtain_stabs_in_S_Q(S, T_0)
+#     if !full_S_Q_returned
+#         throw("The entire S_Q is not returned. The code for obtaining the entire S_Q is not implemented yet.")
+#     end
     
-    # Retrieve t_s_q_bar and t_s_C_q_bar from the dictionary using the syndrome s_q_bar and s_C_q_bar
-    s_q_bar = [i in S_Q_indices ? s_bar[i] : 0 for i in eachindex(s_bar)]
-    t_s_q_bar = BitVector(t_s_dict[s_q_bar]) 
+#     # Retrieve t_s_q_bar and t_s_C_q_bar from the dictionary using the syndrome s_q_bar and s_C_q_bar
+#     s_q_bar = [i in S_Q_indices ? s_bar[i] : 0 for i in eachindex(s_bar)]
+#     t_s_q_bar = BitVector(t_s_dict[s_q_bar]) 
 
-    s_C_q_bar = [i in S_Q_indices ? 0 : s_bar[i] for i in eachindex(s_bar)]
-    t_s_C_q_bar = BitVector(t_s_dict[s_C_q_bar])
+#     s_C_q_bar = [i in S_Q_indices ? 0 : s_bar[i] for i in eachindex(s_bar)]
+#     t_s_C_q_bar = BitVector(t_s_dict[s_C_q_bar])
     
-    # STAGE 1
+#     # STAGE 1
     
-    # Initialize trackers for the maximum probability search
-    # We use 0 so that the first calculated probability will always be larger
-    max_prob = 0
-    t_star_star_star = BitVector(undef, 26)
-    k_logical = size(L, 1)
-    num_T0_rows = size(T_0, 1)
+#     # Initialize trackers for the maximum probability search
+#     # We use 0 so that the first calculated probability will always be larger
+#     max_prob = 0
+#     t_star_star_star = BitVector(undef, 26)
+#     k_logical = size(L, 1)
+#     num_T0_rows = size(T_0, 1)
     
-    for i in 1:num_T0_rows
-        t = BitVector(T_0[i,:])        
-            # Prepare the second argument: (t + t_s_bar) mod 2
-            # In Julia, .!= or .⊻ serves as a bitwise XOR for BitVectors
-            t_combined = t .⊻ t_s_C_q_bar .⊻ t_s_q_bar
-            println("Syndrome for t_combined = ", findall(!iszero, get_syndrome(S, t_combined)))
+#     for i in 1:num_T0_rows
+#         t = BitVector(T_0[i,:])        
+#             # Prepare the second argument: (t + t_s_bar) mod 2
+#             # In Julia, .!= or .⊻ serves as a bitwise XOR for BitVectors
+#             t_combined = t .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+#             println("Syndrome for t_combined = ", findall(!iszero, get_syndrome(S, t_combined)))
             
-            prob = 0
-            # Calculate probability using the external function
-            for j in 0:(2^k_logical - 1)
-                # Generate coefficients for the linear combination of rows
-                coeffs = digits(j, base=2, pad=k_logical)
+#             prob = 0
+#             # Calculate probability using the external function
+#             for j in 0:(2^k_logical - 1)
+#                 # Generate coefficients for the linear combination of rows
+#                 coeffs = digits(j, base=2, pad=k_logical)
             
-                # Compute element l in the row space: l = coeffs * L (mod 2)
-                # We use transpose multiplication and ensure results are 0 or 1
-                l = BitVector(vec(coeffs' * L) .% 2)
-                prob += calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
-            end
-            # 5. Check for the maximum probability
-            println("prob = ", prob, ", error = ", print_pauli_operators((l.⊻ t_combined)', true))
-            if prob > max_prob
-                max_prob = prob
-                t_star_star_star = copy(t)
-            end
-    end
+#                 # Compute element l in the row space: l = coeffs * L (mod 2)
+#                 # We use transpose multiplication and ensure results are 0 or 1
+#                 l = BitVector(vec(coeffs' * L) .% 2)
+#                 prob += calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+#             end
+#             # 5. Check for the maximum probability
+#             println("prob = ", prob, ", error = ", print_pauli_operators((l.⊻ t_combined)', true))
+#             if prob > max_prob
+#                 max_prob = prob
+#                 t_star_star_star = copy(t)
+#             end
+#     end
     
-    l_star_star_star = BitVector(undef, 26)
+#     l_star_star_star = BitVector(undef, 26)
         
-    # STAGE 2
+#     # STAGE 2
     
-    # Initialize trackers for the maximum probability search
-    # We use 0 so that the first calculated probability will always be larger
-    l_star_star_star = BitVector(undef, 26)
-    max_prob = 0
-    t_combined = t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
-        # 2. Iterate over all elements t in T_0_q (rowspace of the matrix T_0)
-            for j in 0:(2^k_logical - 1)
-                # Generate coefficients for the linear combination of rows
-                coeffs = digits(j, base=2, pad=k_logical)
+#     # Initialize trackers for the maximum probability search
+#     # We use 0 so that the first calculated probability will always be larger
+#     l_star_star_star = BitVector(undef, 26)
+#     max_prob = 0
+#     t_combined = t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+#         # 2. Iterate over all elements t in T_0_q (rowspace of the matrix T_0)
+#             for j in 0:(2^k_logical - 1)
+#                 # Generate coefficients for the linear combination of rows
+#                 coeffs = digits(j, base=2, pad=k_logical)
              
-                # Compute element l in the row space: l = coeffs * L (mod 2)
-                # We use transpose multiplication and ensure results are 0 or 1
-                l = BitVector(vec(coeffs' * L) .% 2)
-                prob = calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
-            end
-            # 5. Check for the maximum probability
-            println("prob = ", prob, ", error = ", print_pauli_operators((l .⊻ t_combined)', true))
-            if prob > max_prob
-                max_prob = prob
-                t_star_star_star = copy(t)
-            end
-    # 6. Compute the recovery operator: l* + t* + t_s_bar (mod 2)
-    recovery_operator = l_star_star_star .⊻ t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
-println("l_star_star_star = ", print_pauli_operators(l_star_star_star', true))
-println("t_star_star_star = ", print_pauli_operators(t_star_star_star', true))
-println("t_s_C_q_bar = ", print_pauli_operators(t_s_C_q_bar', true))
-println("Syndrome for t_s_C_q_bar = ", findall(!iszero,get_syndrome(S, t_s_C_q_bar)))
-println("t_s_q_bar = ", print_pauli_operators(t_s_q_bar', true))
-println("max prob = ", max_prob, ", recovery operator = ", print_pauli_operators(recovery_operator', true), "\n\n")
+#                 # Compute element l in the row space: l = coeffs * L (mod 2)
+#                 # We use transpose multiplication and ensure results are 0 or 1
+#                 l = BitVector(vec(coeffs' * L) .% 2)
+#                 prob = calculate_coset_probability(BitMatrix(Bool.(S)), BitMatrix(Bool.(G)), l, t_combined, p)
+#             end
+#             # 5. Check for the maximum probability
+#             println("prob = ", prob, ", error = ", print_pauli_operators((l .⊻ t_combined)', true))
+#             if prob > max_prob
+#                 max_prob = prob
+#                 t_star_star_star = copy(t)
+#             end
+#     # 6. Compute the recovery operator: l* + t* + t_s_bar (mod 2)
+#     recovery_operator = l_star_star_star .⊻ t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar
+# println("l_star_star_star = ", print_pauli_operators(l_star_star_star', true))
+# println("t_star_star_star = ", print_pauli_operators(t_star_star_star', true))
+# println("t_s_C_q_bar = ", print_pauli_operators(t_s_C_q_bar', true))
+# println("Syndrome for t_s_C_q_bar = ", findall(!iszero,get_syndrome(S, t_s_C_q_bar)))
+# println("t_s_q_bar = ", print_pauli_operators(t_s_q_bar', true))
+# println("max prob = ", max_prob, ", recovery operator = ", print_pauli_operators(recovery_operator', true), "\n\n")
     
-    return recovery_operator, l_star_star_star, t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar, t_star_star_star, t_s_q_bar, t_s_C_q_bar
-end
+#     return recovery_operator, l_star_star_star, t_star_star_star .⊻ t_s_C_q_bar .⊻ t_s_q_bar, t_star_star_star, t_s_q_bar, t_s_C_q_bar
+# end
 
 function decode_EAOAQEC_two_level_type2(s_bar, S, G, L, T_0, p, t_s_dict)
 
